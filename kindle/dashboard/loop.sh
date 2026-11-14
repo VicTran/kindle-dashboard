@@ -54,7 +54,14 @@ fetch_and_show() {
   fi
   rm -f "$IMG"
   # thêm ?t=... để không bị bộ nhớ đệm CDN trả ảnh cũ
-  curl -s -L -m 60 -o "$IMG" "$IMAGE_URL?t=$(date +%s)"
+  # Có ALT_IMAGE_URL thì luân phiên: lần này ảnh chính, lần sau ảnh phụ, rồi lặp lại
+  URL="$IMAGE_URL"
+  if [ -n "$ALT_IMAGE_URL" ]; then
+    n=$(cat /tmp/dashboard_turn 2>/dev/null || echo 0)
+    [ $((n % 2)) -eq 1 ] && URL="$ALT_IMAGE_URL"
+    echo $((n + 1)) > /tmp/dashboard_turn
+  fi
+  curl -s -L -m 60 -o "$IMG" "$URL?t=$(date +%s)"
   if [ ! -s "$IMG" ]; then
     log "Tải ảnh thất bại"
     eips 1 1 "Tai anh that bai - se thu lai sau"
