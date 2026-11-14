@@ -16,22 +16,54 @@ log() {
 
 wifi() { lipc-set-prop com.lab126.cmd wirelessEnable "$1" 2>/dev/null; }
 
+# 1 = đang cắm cáp/sạc, 0 = chạy pin (dùng để phân biệt cắm/rút cáp với bấm nút nguồn)
+charging() {
+  c=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)
+  [ -n "$c" ] || c=$(cat /sys/class/power_supply/*/online 2>/dev/null | head -1)
+  echo "${c:-?}"
+}
+
 battery() {
   b=$(lipc-get-prop com.lab126.powerd battLevel 2>/dev/null)
   [ -n "$b" ] || b=$(lipc-get-prop com.lab126.powerd status 2>/dev/null | grep "Battery Level:" | cut -d: -f2 | tr -d '% ')
   echo "${b:-100}"
 }
 
-init() {
-  log "=== Khởi động dashboard ==="
+# Ghi trạng thái giao diện + powerd vào log (để dò lỗi màn hình Kindle tự hiện lại)
+diag() {
+  g=$(status lab126_gui 2>&1 | head -1); f=$(status framework 2>&1 | head -1)
+  p=$(lipc-get-prop com.lab126.powerd state 2>&1); s=$(lipc-get-prop com.lab126.powerd preventScreenSaver 2>&1)
+  log "  [$1] gui: ${g:-?} | framework: ${f:-?} | powerd: ${p:-?} | chặn chờ: ${s:-?}"
+}
+
+stop_gui() {
   # Tắt giao diện Kindle để icon trạng thái không vẽ đè lên ảnh và cho phép ngủ sâu.
-  /etc/init.d/framework stop 2>/dev/null || {
+  if /etc/init.d/framework stop >/dev/null 2>&1; then
+    log "  dừng giao diện: init.d/framework"
+  else
     stop framework >/dev/null 2>&1 || initctl stop framework >/dev/null 2>&1
     stop lab126_gui >/dev/null 2>&1
-  }
+    log "  dừng giao diện: stop framework/lab126_gui"
+  fi
   initctl stop webreader >/dev/null 2>&1
-  { echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; } 2>/dev/null
   lipc-set-prop com.lab126.powerd preventScreenSaver 1 2>/dev/null
+}
+
+init() {
+  log "=== Khởi động dashboard ==="
+  diag "trước khi tắt"
+  stop_gui
+  { echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; } 2>/dev/null
+  diag "sau khi tắt"
+}
+
+# Giao diện Kindle tự bật lại (vẽ màn hình khoá đè lên dashboard)? → tắt lại
+recheck_gui() {
+  if status lab126_gui 2>/dev/null | grep -q running || status framework 2>/dev/null | grep -q running; then
+    log "  Giao diện Kindle đã tự bật lại → tắt lại"
+    diag "phát hiện giao diện"
+    stop_gui
+  fi
 }
 
 wait_net() {
@@ -114,16 +146,32 @@ go_to_sleep() {
   RTC=/sys/class/rtc/rtc1
   [ -d "$RTC" ] || RTC=/sys/class/rtc/rtc0
   wake_at=$(( $(date +%s) + secs ))
+  c0=$(charging)
   # đặt báo thức RTC rồi ngủ sâu; nếu không được thì sleep thường
   if { echo 0 > "$RTC/wakealarm" &&
        echo "+${secs}" > "$RTC/wakealarm" &&
        echo mem > /sys/power/state; } 2>/dev/null; then
-    # Tỉnh dậy sớm hơn giờ hẹn quá 60 giây = có người bấm nút nguồn → thoát dashboard
-    if [ "$(date +%s)" -lt $(( wake_at - 60 )) ]; then
-      exit_dashboard
+    sleep 2   # chờ Kindle cập nhật trạng thái sạc sau khi cắm/rút cáp
+    left=$(( wake_at - $(date +%s) ))
+    c1=$(charging)
+    log "Thức dậy (ngủ sâu, sớm hơn hẹn ${left}s, sạc: $c0→$c1)"
+    diag "sau khi thức"
+    # Tỉnh dậy sớm hơn giờ hẹn quá 60 giây:
+    #  - trạng thái sạc vừa đổi = cắm/rút cáp → không thoát, ngủ tiếp cho hết giờ
+    #  - còn lại = có người bấm nút nguồn → thoát dashboard
+    if [ "$left" -gt 60 ]; then
+      if [ "$c0" != "$c1" ]; then
+        log "Cắm/rút cáp → ngủ tiếp"
+        go_to_sleep "$left"
+      else
+        exit_dashboard
+      fi
     fi
   else
+    log "Không ngủ sâu được → chờ thường ${secs}s"
+    diag "trước khi chờ thường"
     sleep "$secs"
+    log "Hết giờ chờ thường"
   fi
 }
 
@@ -143,6 +191,7 @@ exit_dashboard() {
 
 init
 while true; do
+  recheck_gui
   if fetch_and_show; then
     go_to_sleep "$(sleep_secs)"
   else
