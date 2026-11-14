@@ -16,11 +16,14 @@ log() {
 
 wifi() { lipc-set-prop com.lab126.cmd wirelessEnable "$1" 2>/dev/null; }
 
-# 1 = đang cắm cáp/sạc, 0 = chạy pin (dùng để phân biệt cắm/rút cáp với bấm nút nguồn)
+# "Dấu vân tay" trạng thái cáp: đang sạc + trạng thái cổng USB + nguồn ngoài.
+# Cắm/rút cáp làm dấu này đổi (kể cả khi pin đầy, không sạc); bấm nút nguồn thì không.
 charging() {
-  c=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)
-  [ -n "$c" ] || c=$(cat /sys/class/power_supply/*/online 2>/dev/null | head -1)
-  echo "${c:-?}"
+  c="sạc=$(lipc-get-prop com.lab126.powerd isCharging 2>/dev/null)"
+  for f in /sys/class/udc/*/state /sys/class/power_supply/*/online; do
+    [ -r "$f" ] && c="$c,$(basename "$(dirname "$f")")=$(cat "$f" 2>/dev/null)"
+  done
+  echo "$c" | tr ' ' '_'
 }
 
 battery() {
@@ -55,6 +58,7 @@ init() {
   stop_gui
   { echo powersave > /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor; } 2>/dev/null
   diag "sau khi tắt"
+  log "  trạng thái cáp lúc bật: $(charging)"
 }
 
 # Giao diện Kindle tự bật lại (vẽ màn hình khoá đè lên dashboard)? → tắt lại
@@ -151,7 +155,7 @@ go_to_sleep() {
   if { echo 0 > "$RTC/wakealarm" &&
        echo "+${secs}" > "$RTC/wakealarm" &&
        echo mem > /sys/power/state; } 2>/dev/null; then
-    sleep 2   # chờ Kindle cập nhật trạng thái sạc sau khi cắm/rút cáp
+    sleep 3   # chờ Kindle cập nhật trạng thái cáp/USB sau khi cắm/rút
     left=$(( wake_at - $(date +%s) ))
     c1=$(charging)
     log "Thức dậy (ngủ sâu, sớm hơn hẹn ${left}s, sạc: $c0→$c1)"
