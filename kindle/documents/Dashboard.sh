@@ -19,7 +19,7 @@ case "$IMAGE_URL" in
     exit 1 ;;
 esac
 
-if pgrep -f "$DIR/loop.sh" >/dev/null 2>&1; then
+if pgrep -f "/tmp/dash/loop.sh" >/dev/null 2>&1 || pgrep -f "$DIR/loop.sh" >/dev/null 2>&1; then
   echo "Dashboard dang chay roi."
   exit 0
 fi
@@ -27,10 +27,14 @@ fi
 echo "Dang bat dashboard..."
 echo "Thoat: bam nut nguon 1 lan."
 sleep 3
+# Chạy bản chép trong /tmp: cắm cáp vào máy tính làm /mnt/us tạm biến mất,
+# chạy thẳng từ /mnt/us thì vòng lặp sẽ chết giữa chừng (màn hình trắng).
+mkdir -p /tmp/dash
+cp "$DIR/loop.sh" "$DIR/config.sh" /tmp/dash/
 # chạy nền, tách khỏi tiến trình giao diện để không bị dừng theo
 if command -v setsid >/dev/null 2>&1; then
-  setsid sh "$DIR/loop.sh" >/dev/null 2>&1 < /dev/null &
+  setsid sh /tmp/dash/loop.sh >/dev/null 2>&1 < /dev/null &
 else
-  nohup sh "$DIR/loop.sh" >/dev/null 2>&1 < /dev/null &
+  nohup sh /tmp/dash/loop.sh >/dev/null 2>&1 < /dev/null &
 fi
 exit 0

@@ -6,12 +6,21 @@
 DIR="${DASH_DIR:-/mnt/us/dashboard}"
 LOG="$DIR/log.txt"
 IMG="/tmp/dashboard.png"
-. "$DIR/config.sh"
+# Dashboard.sh chép loop.sh + config.sh sang /tmp/dash rồi chạy bản ở đó, để khi cắm cáp vào máy tính
+# (Kindle nhường bộ nhớ /mnt/us cho máy tính) vòng lặp không mất file mà dừng giữa chừng.
+SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [ -f "$SELF_DIR/config.sh" ]; then . "$SELF_DIR/config.sh"; else . "$DIR/config.sh"; fi
 
 log() {
-  echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$LOG"
-  # giữ log nhỏ
-  if [ "$(wc -c < "$LOG")" -gt 200000 ]; then tail -n 300 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"; fi
+  line="$(date '+%Y-%m-%d %H:%M:%S') $*"
+  # /mnt/us đang nhường cho máy tính thì ghi tạm vào /tmp, lúc sau gộp lại
+  if [ -d "$DIR" ] && echo "$line" >> "$LOG" 2>/dev/null; then
+    if [ -s /tmp/dash_log.txt ]; then cat /tmp/dash_log.txt >> "$LOG" 2>/dev/null && rm -f /tmp/dash_log.txt; fi
+    # giữ log nhỏ
+    if [ "$(wc -c < "$LOG" 2>/dev/null || echo 0)" -gt 200000 ]; then tail -n 300 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"; fi
+  else
+    echo "$line [ghi tạm lúc cắm máy tính]" >> /tmp/dash_log.txt
+  fi
 }
 
 wifi() { lipc-set-prop com.lab126.cmd wirelessEnable "$1" 2>/dev/null; }
